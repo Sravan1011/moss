@@ -8,7 +8,8 @@ Folder holding the database-connector packages. Each subfolder is its own pip-in
 moss-data-connector/
 ├── _template/               # copy-me starting point for a new connector
 ├── moss-connector-sqlite/   # SQLite source (stdlib, no driver)
-└── moss-connector-mongodb/  # MongoDB source (requires pymongo)
+├── moss-connector-mongodb/  # MongoDB source (requires pymongo)
+└── moss-connector-mysql/    # MySQL / MariaDB source (requires pymysql)
 ```
 
 
@@ -34,6 +35,7 @@ await ingest(source, project_id="...", project_key="...", index_name="articles")
 | ---------------------------------------------------- | -------- | ------------ |
 | [`moss-connector-sqlite`](moss-connector-sqlite)     | SQLite   | —            |
 | [`moss-connector-mongodb`](moss-connector-mongodb)   | MongoDB  | `pymongo`    |
+| [`moss-connector-mysql`](moss-connector-mysql)        | MySQL    | `pymysql`    |
 
 ## Adding a new connector
 
