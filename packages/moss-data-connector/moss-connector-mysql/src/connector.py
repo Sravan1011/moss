@@ -4,7 +4,7 @@ Reads rows from a MySQL or MariaDB database via ``pymysql`` and yields one
 ``DocumentInfo`` per row. Uses ``DictCursor`` so every row is a plain dict
 keyed by column name.
 
-Works against regular MySQL, MariaDB, and PlanetScale.
+Works against regular MySQL and MariaDB.
 """
 
 from __future__ import annotations
