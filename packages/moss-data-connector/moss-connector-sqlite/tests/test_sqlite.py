@@ -7,6 +7,7 @@ instead of a real one.
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import patch
@@ -81,6 +82,65 @@ async def test_ingest_creates_index(sqlite_db, fake_client):
     assert call["docs"][0].id == "1"
     assert call["docs"][0].text == "Body for article 1"
     assert call["docs"][0].metadata == {"title": "Title 1"}
+
+
+async def test_auto_id_defaults_to_false(sqlite_db, fake_client):
+    source = SQLiteConnector(
+        database=sqlite_db,
+        query="SELECT id, title, body FROM articles",
+        mapper=lambda r: DocumentInfo(
+            id=str(r["id"]),
+            text=r["body"],
+            metadata={"title": r["title"]},
+        ),
+    )
+
+    await ingest(source, "fake_id", "fake_key", index_name="articles")
+
+    assert len(fake_client.calls) == 1
+    docs = fake_client.calls[0]["docs"]
+    assert docs[0].id == "1"
+    assert docs[1].id == "2"
+    assert docs[2].id == "3"
+
+
+async def test_auto_id_replaces_mapper_id(sqlite_db, fake_client):
+    source = SQLiteConnector(
+        database=sqlite_db,
+        query="SELECT id, title, body FROM articles",
+        mapper=lambda r: DocumentInfo(
+            id=str(r["id"]),
+            text=r["body"],
+            metadata={"title": r["title"]},
+        ),
+    )
+
+    await ingest(
+        source,
+        "fake_id",
+        "fake_key",
+        index_name="articles",
+        auto_id=True,
+    )
+
+    assert len(fake_client.calls) == 1
+    docs = fake_client.calls[0]["docs"]
+    assert len(docs) == 3
+    original_ids = {"1", "2", "3"}
+    for doc in docs:
+        assert doc.id
+        assert uuid.UUID(doc.id)
+        assert doc.id not in original_ids
+    assert [doc.text for doc in docs] == [
+        "Body for article 1",
+        "Body for article 2",
+        "Body for article 3",
+    ]
+    assert [doc.metadata for doc in docs] == [
+        {"title": "Title 1"},
+        {"title": "Title 2"},
+        {"title": "Title 3"},
+    ]
 
 
 async def test_empty_source_skips_network_call(fake_client):

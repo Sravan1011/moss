@@ -28,6 +28,8 @@ source = SQLiteConnector(
 await ingest(source, project_id="...", project_key="...", index_name="articles")
 ```
 
+Use `auto_id=True` when your mapper does not have a stable primary key and you want Moss to generate UUID document IDs.
+
 
 ## Available connectors
 
