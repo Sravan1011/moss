@@ -7,6 +7,7 @@ from typing import Optional
 
 import typer
 
+from .commands.completions import completions_app
 from .commands.doc import doc_app
 from .commands.index import index_app
 from .commands.init_cmd import init_command
@@ -28,6 +29,7 @@ app.add_typer(index_app, name="index", help="Manage indexes")
 app.add_typer(doc_app, name="doc", help="Manage documents")
 app.add_typer(job_app, name="job", help="Track background jobs")
 app.add_typer(profile_app, name="profile", help="Manage auth profiles")
+app.add_typer(completions_app, name="completions", help="Generate shell completion scripts")
 
 # Register top-level commands
 app.command(name="query")(query_command)

@@ -14,6 +14,7 @@ from .. import output
 from ..config import resolve_credentials
 from ..documents import load_documents
 from ..job_waiter import wait_for_job
+from ._completions import complete_index_name
 
 console = Console()
 doc_app = typer.Typer(name="doc", help="Manage documents in an index")
@@ -29,7 +30,7 @@ def _client(ctx: typer.Context) -> MossClient:
 @doc_app.command(name="add")
 def add(
     ctx: typer.Context,
-    index_name: str = typer.Argument(..., help="Index name"),
+    index_name: str = typer.Argument(..., help="Index name", autocompletion=complete_index_name),
     file: str = typer.Option(..., "--file", "-f", help="Path to JSON/CSV document file, or '-' for stdin"),
     profile: Optional[str] = typer.Option(
         None, "--profile", help="Credential profile name"
@@ -63,7 +64,7 @@ def add(
 @doc_app.command(name="delete")
 def delete(
     ctx: typer.Context,
-    index_name: str = typer.Argument(..., help="Index name"),
+    index_name: str = typer.Argument(..., help="Index name", autocompletion=complete_index_name),
     ids: str = typer.Option(..., "--ids", "-i", help="Comma-separated document IDs"),
     profile: Optional[str] = typer.Option(
         None, "--profile", help="Credential profile name"
@@ -95,7 +96,7 @@ def delete(
 @doc_app.command(name="get")
 def get(
     ctx: typer.Context,
-    index_name: str = typer.Argument(..., help="Index name"),
+    index_name: str = typer.Argument(..., help="Index name", autocompletion=complete_index_name),
     ids: Optional[str] = typer.Option(None, "--ids", "-i", help="Comma-separated document IDs (omit for all)"),
     profile: Optional[str] = typer.Option(
         None, "--profile", help="Credential profile name"

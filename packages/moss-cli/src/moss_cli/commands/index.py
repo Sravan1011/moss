@@ -14,6 +14,7 @@ from .. import output
 from ..config import resolve_credentials
 from ..documents import load_documents
 from ..job_waiter import wait_for_job
+from ._completions import complete_index_name
 
 console = Console()
 index_app = typer.Typer(name="index", help="Manage indexes")
@@ -74,7 +75,7 @@ def list_indexes(
 @index_app.command(name="get")
 def get(
     ctx: typer.Context,
-    name: str = typer.Argument(..., help="Index name"),
+    name: str = typer.Argument(..., help="Index name", autocompletion=complete_index_name),
     profile: Optional[str] = typer.Option(
         None, "--profile", help="Credential profile name"
     ),
@@ -91,7 +92,7 @@ def get(
 @index_app.command(name="delete")
 def delete(
     ctx: typer.Context,
-    name: str = typer.Argument(..., help="Index name"),
+    name: str = typer.Argument(..., help="Index name", autocompletion=complete_index_name),
     profile: Optional[str] = typer.Option(
         None, "--profile", help="Credential profile name"
     ),

@@ -172,6 +172,47 @@ moss profile list
 moss profile delete staging --force
 ```
 
+### Shell Completions
+
+Enable tab-completion for all commands, subcommands, flags, and index names.
+
+```bash
+# Generate completion script for Bash
+moss completions bash
+
+# Generate completion script for Zsh
+moss completions zsh
+
+# Install completions (auto-detects your shell)
+moss completions install
+
+# Install for a specific shell
+moss completions install bash
+moss completions install zsh
+
+# Quick one-time enable (current session only)
+eval "$(moss completions bash)"
+
+# Manual install — append to your shell config
+moss completions bash >> ~/.bashrc
+moss completions zsh >> ~/.zshrc
+
+# Show completion script without installing
+moss completions show
+moss completions show bash
+```
+
+**After installing**, restart your shell or source your config:
+
+```bash
+source ~/.bashrc   # Bash
+source ~/.zshrc    # Zsh
+```
+
+**Dynamic index name completion:** When credentials are configured, pressing
+`<TAB>` after `moss query`, `moss index get`, `moss index delete`, or any
+`moss doc` subcommand will list your available index names.
+
 ## Document File Format
 
 ### JSON (recommended)
