@@ -104,7 +104,6 @@ def install_completion(
 
     script = _get_completion_script(shell)
 
-    import os
     from pathlib import Path
 
     if shell == "bash":

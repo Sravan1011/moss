@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import typer
 from typer.testing import CliRunner
 
 from moss_cli.main import app
@@ -79,7 +78,6 @@ class TestInstallCompletion:
     """Tests for `moss completions install`."""
 
     def test_install_bash(self, tmp_path: object) -> None:
-        import os
         from pathlib import Path
 
         # Create a temporary bashrc
