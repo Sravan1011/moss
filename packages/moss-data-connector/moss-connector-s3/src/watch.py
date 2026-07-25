@@ -70,7 +70,9 @@ async def watch(
 
     Snapshots are taken *before* the corresponding sync, so objects that
     change while a sync is running are picked up on the next poll rather
-    than lost.
+    than lost. Index existence is re-confirmed before each mutation, so an
+    index deleted externally mid-run is recreated from the full current
+    bucket on the next change instead of crashing the watcher.
 
     Args:
         source: The ``S3Connector`` to read from. Its ``mapper`` must assign
@@ -129,38 +131,58 @@ async def watch(
                 index_exists = False
             key_ids.clear()
         else:
-            changed = [k for k, marker in current.items() if previous.get(k) != marker]
-            removed = [k for k in previous if k not in current]
+            # The index can vanish externally between polls; re-confirm
+            # before mutating so a missing index is recreated instead of
+            # crashing add_docs and exiting the watcher.
+            if index_exists:
+                index_exists = any(
+                    idx.name == index_name for idx in await client.list_indexes()
+                )
 
-            pairs = await asyncio.to_thread(lambda keys=changed: list(source.fetch(keys)))
-            fetched = {key for key, _ in pairs}
-            # Objects that vanished between the snapshot and the fetch are
-            # removals; drop them from `current` too so the next poll's
-            # comparison stays consistent.
-            for key in changed:
-                if key not in fetched:
-                    removed.append(key)
-                    current.pop(key, None)
+            if not index_exists:
+                # No index to diff against — build it from the full current
+                # bucket, not just the changed keys, and rebuild key_ids.
+                pairs = await asyncio.to_thread(
+                    lambda keys=list(current): list(source.fetch(keys))
+                )
+                fetched = {key for key, _ in pairs}
+                for key in list(current):
+                    if key not in fetched:
+                        current.pop(key)
+                key_ids = {key: doc.id for key, doc in pairs}
+                docs = [doc for _, doc in pairs]
+                if docs:
+                    await client.create_index(index_name, docs, model_id=model_id)
+                    index_exists = True
+            else:
+                changed = [k for k, marker in current.items() if previous.get(k) != marker]
+                removed = [k for k in previous if k not in current]
 
-            delete_ids = [key_ids.pop(key) for key in removed if key in key_ids]
-            new_docs = []
-            for key, doc in pairs:
-                old_id = key_ids.get(key)
-                if old_id is not None and old_id != doc.id:
-                    delete_ids.append(old_id)  # mapper id changed for this key
-                key_ids[key] = doc.id
-                new_docs.append(doc)
+                pairs = await asyncio.to_thread(lambda keys=changed: list(source.fetch(keys)))
+                fetched = {key for key, _ in pairs}
+                # Objects that vanished between the snapshot and the fetch are
+                # removals; drop them from `current` too so the next poll's
+                # comparison stays consistent.
+                for key in changed:
+                    if key not in fetched:
+                        removed.append(key)
+                        current.pop(key, None)
 
-            if new_docs:
-                if index_exists:
+                delete_ids = [key_ids.pop(key) for key in removed if key in key_ids]
+                new_docs = []
+                for key, doc in pairs:
+                    old_id = key_ids.get(key)
+                    if old_id is not None and old_id != doc.id:
+                        delete_ids.append(old_id)  # mapper id changed for this key
+                    key_ids[key] = doc.id
+                    new_docs.append(doc)
+
+                if new_docs:
                     await client.add_docs(
                         index_name, new_docs, options=MutationOptions(upsert=True)
                     )
-                else:
-                    await client.create_index(index_name, new_docs, model_id=model_id)
-                    index_exists = True
-            if delete_ids and index_exists:
-                await client.delete_docs(index_name, delete_ids)
+                if delete_ids:
+                    await client.delete_docs(index_name, delete_ids)
 
         synced += 1
         previous = current

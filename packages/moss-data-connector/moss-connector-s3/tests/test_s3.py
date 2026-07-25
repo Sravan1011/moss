@@ -466,6 +466,30 @@ async def test_watch_externally_deleted_index_is_noop(s3_bucket):
     assert fake_moss.existing == set()
 
 
+async def test_watch_recreates_externally_deleted_index(s3_bucket):
+    """If the index vanishes externally while the bucket is non-empty, the
+    next change recreates it from the full bucket — not just the diff."""
+    fake_moss = FakeMossClient()
+    source = S3Connector(bucket=BUCKET, mapper=_simple_mapper, region_name=REGION)
+
+    async def sleep_drop_index_and_mutate(_seconds):
+        fake_moss.indexes.pop("docs", None)  # someone else deleted the index
+        s3_bucket.put_object(Bucket=BUCKET, Key="docs/new.md", Body=b"Newly added document.")
+
+    with (
+        patch("moss_connector_s3.watch.MossClient", return_value=fake_moss),
+        patch("moss_connector_s3.watch.asyncio.sleep", side_effect=sleep_drop_index_and_mutate),
+    ):
+        synced = await watch(
+            source, "fake_id", "fake_key", "docs", poll_interval=0, max_polls=1
+        )
+
+    assert synced == 1
+    assert [c["op"] for c in fake_moss.calls] == ["create", "create"]
+    # Recreated from the whole bucket, not only the changed key.
+    assert set(fake_moss.docs_in("docs")) == set(SAMPLE_OBJECTS) | {"docs/new.md"}
+
+
 async def test_watch_async_on_change_awaited(s3_bucket):
     """An async on_change callback is awaited, not dropped."""
     fake_moss = FakeMossClient()
