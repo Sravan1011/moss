@@ -103,16 +103,16 @@ def _git_sha() -> str:
 
 
 def _missing_required_input(message: str):
-    """Handle a missing required benchmark input (corpus, ground truth, …).
+    """Handle a missing benchmark prerequisite (inputs, measurement data, …).
 
     Skip on fork PRs (``ALLOW_BENCHMARK_SKIP=1``) and local runs, but FAIL
-    in trusted CI — a missing required input must not turn the benchmark
+    in trusted CI — a missing prerequisite must not turn the benchmark
     workflow into a green no-op.
     """
     if os.getenv("ALLOW_BENCHMARK_SKIP") == "1":
         pytest.skip(f"{message} — fork PR, skipping benchmarks")
     if os.getenv("CI"):
-        pytest.fail(f"{message} — required input missing in a trusted CI run")
+        pytest.fail(f"{message} — must not silently pass in a trusted CI run")
     pytest.skip(message)
 
 
@@ -280,9 +280,11 @@ def benchmark_results(corpus_sig) -> dict:
 
 # ---------------------------------------------------------------------------
 # Tests — pytest collects these in declaration order (measure → guard →
-# write). The ordering is a soft dependency only: the guard and writer
-# degrade gracefully (skip / write partial results) if measurement data is
-# missing, so a random-ordering plugin breaks nothing, it just skips checks.
+# write). Locally and on fork PRs the guards degrade gracefully (skip) when
+# measurement data is missing. In trusted CI the guards FAIL on missing
+# measurement data — a regression gate that silently passes without
+# measurements is a green no-op — so a random-ordering plugin that runs a
+# guard before the measurement tests will fail loudly there, by design.
 # ---------------------------------------------------------------------------
 
 
@@ -416,7 +418,12 @@ class TestRegressionGuard:
         current_p95 = benchmark_results.get("latency_ms", {}).get("p95")
 
         if baseline_p95 is None or current_p95 is None:
-            pytest.skip("Latency data not yet available — run latency test first")
+            # A baseline comparison was requested but there is nothing to
+            # compare: fine when measurement legitimately skipped (fork PR /
+            # local run without credentials), a red flag in trusted CI.
+            _missing_required_input(
+                "Latency measurement data missing — the latency test did not run"
+            )
 
         _assert_baseline_compatible(baseline, benchmark_results)
 
@@ -478,7 +485,9 @@ class TestRegressionGuard:
         current_recall = benchmark_results.get("recall", {}).get("recall_at_5")
 
         if baseline_recall is None or current_recall is None:
-            pytest.skip("Recall data not yet available — run recall test first")
+            _missing_required_input(
+                "Recall measurement data missing — the recall test did not run"
+            )
 
         _assert_baseline_compatible(baseline, benchmark_results)
 
