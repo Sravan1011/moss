@@ -36,6 +36,7 @@ from dotenv import load_dotenv
 
 from bench_queries import (
     DOC_COUNT,
+    INDEX_NAME_PREFIX,
     MODEL_ID,
     QUERIES,
     corpus_signature,
@@ -70,7 +71,32 @@ async def _create_index(client, index_name: str, corpus_slice: list[dict]) -> No
     print(f"Created index '{index_name}' with {result.doc_count} docs")
 
 
-async def main(recreate: bool) -> None:
+def _guard_deletion(index_name: str, derived_name: str, force: bool) -> None:
+    """Refuse to delete indexes that are not clearly benchmark-owned.
+
+    MOSS_INDEX_NAME is a documented override, so a developer whose
+    environment points at a shared or production Moss project could
+    otherwise aim --recreate at a non-benchmark index and destroy it.
+    """
+    if index_name == derived_name:
+        return  # the derived benchmark index — always safe to recreate
+    if not index_name.startswith(f"{INDEX_NAME_PREFIX}-"):
+        print(
+            f"Error: refusing to delete index '{index_name}' — it is outside "
+            f"the benchmark namespace ('{INDEX_NAME_PREFIX}-*'). Unset "
+            "MOSS_INDEX_NAME or point it at a benchmark index."
+        )
+        sys.exit(1)
+    if not force:
+        print(
+            f"Error: MOSS_INDEX_NAME overrides the derived name "
+            f"('{index_name}' != '{derived_name}'). Pass --force to confirm "
+            "deleting the overridden benchmark index."
+        )
+        sys.exit(1)
+
+
+async def main(recreate: bool, force: bool) -> None:
     from moss import MossClient, QueryOptions
 
     project_id = os.getenv("MOSS_PROJECT_ID")
@@ -94,6 +120,7 @@ async def main(recreate: bool) -> None:
     existing = {idx.name for idx in await client.list_indexes()}
 
     if index_name in existing and recreate:
+        _guard_deletion(index_name, index_name_for(signature), force)
         print(f"--recreate: deleting existing index '{index_name}'")
         await client.delete_index(index_name)
         existing.discard(index_name)
@@ -147,5 +174,12 @@ if __name__ == "__main__":
         "querying. Required after a corpus or embedding-model change so the "
         "ground truth reflects the current data.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Confirm --recreate deletion when MOSS_INDEX_NAME overrides the "
+        "derived index name. Only benchmark-namespace indexes "
+        "(benchmark-ci-*) can be deleted even with this flag.",
+    )
     args = parser.parse_args()
-    asyncio.run(main(recreate=args.recreate))
+    asyncio.run(main(recreate=args.recreate, force=args.force))

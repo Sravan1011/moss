@@ -421,7 +421,16 @@ class TestRegressionGuard:
         _assert_baseline_compatible(baseline, benchmark_results)
 
         if baseline_p95 == 0:
-            pytest.skip("Baseline p95 is zero — cannot compute regression ratio")
+            # A zero baseline means the latency guard has never been armed.
+            # Skipping here would let every run pass with the guard silently
+            # inactive — fail instead, with the arming procedure.
+            pytest.fail(
+                "Baseline p95 is zero — the latency guard is not armed. Run the "
+                "Benchmark workflow with update_baseline=true, download the "
+                "benchmark-results-<sha> artifact, and commit it as "
+                "benchmarks/ci/baseline.json (values must come from CI runners; "
+                "this run's artifact works too)."
+            )
 
         regression = (current_p95 - baseline_p95) / baseline_p95
 
