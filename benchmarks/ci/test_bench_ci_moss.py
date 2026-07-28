@@ -481,29 +481,38 @@ class TestRegressionGuard:
         with open(baseline_path) as f:
             baseline = json.load(f)
 
-        baseline_recall = baseline.get("recall", {}).get("recall_at_5")
-        current_recall = benchmark_results.get("recall", {}).get("recall_at_5")
-
-        if baseline_recall is None or current_recall is None:
-            _missing_required_input(
-                "Recall measurement data missing — the recall test did not run"
-            )
+        # Guard every recall metric the suite records — checking only
+        # recall@5 would let a change that preserves the top 5 but drops
+        # documents ranked 6-10 pass while recall@10 regresses.
+        recall_pairs: dict[str, tuple[float, float]] = {}
+        for key in ("recall_at_5", "recall_at_10"):
+            baseline_val = baseline.get("recall", {}).get(key)
+            current_val = benchmark_results.get("recall", {}).get(key)
+            if baseline_val is None or current_val is None:
+                _missing_required_input(
+                    f"Recall measurement data missing for {key} — "
+                    "the recall test did not run"
+                )
+            recall_pairs[key] = (baseline_val, current_val)
 
         _assert_baseline_compatible(baseline, benchmark_results)
 
-        drop = baseline_recall - current_recall
-
+        failures: list[str] = []
         print("\n  Recall regression check:")
-        print(f"    Baseline Recall@5 : {baseline_recall:.4f}")
-        print(f"    Current  Recall@5 : {current_recall:.4f}")
-        print(f"    Drop              : {drop:+.4f}")
-        print(f"    Threshold         : {threshold:.4f}")
+        print(f"    Threshold: {threshold:.4f}")
+        for key, (baseline_val, current_val) in recall_pairs.items():
+            drop = baseline_val - current_val
+            print(
+                f"    {key}: baseline={baseline_val:.4f} "
+                f"current={current_val:.4f} drop={drop:+.4f}"
+            )
+            if drop > threshold:
+                failures.append(
+                    f"{key} dropped by {drop:.4f} (baseline={baseline_val:.4f}, "
+                    f"current={current_val:.4f}, threshold={threshold:.4f})"
+                )
 
-        assert drop <= threshold, (
-            f"Recall@5 dropped by {drop:.4f} "
-            f"(baseline={baseline_recall:.4f}, current={current_recall:.4f}, "
-            f"threshold={threshold:.4f})"
-        )
+        assert not failures, "Recall regression: " + "; ".join(failures)
 
 
 class TestWriteResults:

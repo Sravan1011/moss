@@ -67,7 +67,8 @@ variable pointing at a shared or production index cannot be destroyed.
 The harness compares the current run's metrics against `baseline.json`:
 
 - **Latency**: Fails if P95 increases by more than the threshold (default 20%)
-- **Recall**: Fails if Recall@5 drops by more than the threshold (default 5pp)
+- **Recall**: Fails if Recall@5 **or** Recall@10 drops by more than the
+  threshold (default 5pp)
 
 The latency guard arms itself from the baseline file:
 

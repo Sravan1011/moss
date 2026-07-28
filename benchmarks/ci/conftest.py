@@ -31,6 +31,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--recall-threshold",
         type=float,
         default=0.05,
-        help="Max allowed absolute decrease in recall@5 vs baseline "
-        "(default: 0.05 = 5 percentage points)",
+        help="Max allowed absolute decrease in recall@5 and recall@10 vs "
+        "baseline (default: 0.05 = 5 percentage points)",
     )
