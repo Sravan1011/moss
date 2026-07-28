@@ -1,7 +1,8 @@
 {
   "commit": "f4732a1",
   "timestamp": "2026-07-20T05:35:00+00:00",
-  "_note": "Recall values are measured (hardware-independent) so the recall guard is active. Latency values are intentionally zero and the latency guard FAILS on zero baselines in comparison runs \u2014 the first trusted CI run will be red until a CI-captured baseline is committed: run the Benchmark workflow (update_baseline=true also works), download the benchmark-results-<sha> artifact, and commit it here. Latency baselines must come from CI runners; numbers from other hardware are not comparable.",
+  "latency_guard": "unarmed",
+  "_note": "Recall values are measured (hardware-independent) so the recall guard is active. Latency values are zero and 'latency_guard: unarmed' marks this file as the explicit placeholder: the latency regression test skips (loudly) instead of failing every trusted run. To arm the latency guard, run the Benchmark workflow on a trusted ref, download the benchmark-results-<sha> artifact, and commit it as this file \u2014 artifacts carry no latency_guard flag, so committing one arms the guard automatically. A zero p95 WITHOUT the unarmed flag fails the run as a misconfigured baseline. Latency baselines must come from CI runners; numbers from other hardware are not comparable.",
   "latency_ms": {
     "p50": 0,
     "p95": 0,

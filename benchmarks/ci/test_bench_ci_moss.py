@@ -420,16 +420,32 @@ class TestRegressionGuard:
 
         _assert_baseline_compatible(baseline, benchmark_results)
 
+        if baseline.get("latency_guard") == "unarmed":
+            # The checked-in placeholder declares itself unarmed: latency
+            # baselines must come from CI runners, and none has been captured
+            # yet. Skip loudly (recall is still guarded) instead of failing
+            # every trusted run until the first artifact lands.
+            if baseline_p95 != 0:
+                pytest.fail(
+                    "baseline.json marks latency_guard as 'unarmed' but contains "
+                    "a non-zero p95 — remove the latency_guard flag to arm the "
+                    "guard."
+                )
+            pytest.skip(
+                "LATENCY GUARD NOT ARMED — baseline.json is the explicit "
+                "placeholder (latency_guard: unarmed). To arm it: download the "
+                "benchmark-results-<sha> artifact from a trusted CI run and "
+                "commit it as benchmarks/ci/baseline.json (the artifact carries "
+                "no latency_guard flag, so committing it arms the guard)."
+            )
+
         if baseline_p95 == 0:
-            # A zero baseline means the latency guard has never been armed.
-            # Skipping here would let every run pass with the guard silently
-            # inactive — fail instead, with the arming procedure.
+            # Zero without the explicit unarmed marker is a misconfigured
+            # baseline, not a placeholder — never a silent pass.
             pytest.fail(
-                "Baseline p95 is zero — the latency guard is not armed. Run the "
-                "Benchmark workflow with update_baseline=true, download the "
-                "benchmark-results-<sha> artifact, and commit it as "
-                "benchmarks/ci/baseline.json (values must come from CI runners; "
-                "this run's artifact works too)."
+                "Baseline p95 is zero but baseline.json does not declare "
+                "latency_guard: unarmed — the baseline is misconfigured. Commit "
+                "a CI-captured baseline or restore the explicit placeholder."
             )
 
         regression = (current_p95 - baseline_p95) / baseline_p95

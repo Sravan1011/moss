@@ -69,9 +69,16 @@ The harness compares the current run's metrics against `baseline.json`:
 - **Latency**: Fails if P95 increases by more than the threshold (default 20%)
 - **Recall**: Fails if Recall@5 drops by more than the threshold (default 5pp)
 
-A zero latency baseline **fails** comparison runs rather than skipping — the
-guard cannot stay silently inactive. To arm it, commit a CI-captured
-baseline (see "Updating the baseline" below).
+The latency guard arms itself from the baseline file:
+
+- The checked-in placeholder declares `"latency_guard": "unarmed"` — the
+  latency test skips with a loud message while recall remains guarded, so
+  trusted runs are not red before the first baseline exists.
+- To arm the guard, download the `benchmark-results-<sha>` artifact from a
+  trusted CI run and commit it as `baseline.json`. Artifacts carry no
+  `latency_guard` flag, so committing one arms the guard automatically.
+- A zero p95 **without** the unarmed flag fails the run as a misconfigured
+  baseline — the guard can never be silently inactive by accident.
 
 Thresholds are configurable via CLI flags:
 
