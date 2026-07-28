@@ -34,7 +34,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from bench_queries import DOC_COUNT, INDEX_NAME_DEFAULT, MODEL_ID, QUERIES
+from bench_queries import (
+    DOC_COUNT,
+    MODEL_ID,
+    QUERIES,
+    corpus_signature,
+    index_name_for,
+    load_corpus_slice,
+)
 
 load_dotenv()
 
@@ -43,18 +50,20 @@ load_dotenv()
 GROUND_TRUTH_TOP_K = 50
 
 
-async def _create_index(client, index_name: str) -> None:
-    from moss import DocumentInfo
-
+def _corpus_slice() -> list[dict]:
     corpus_path = Path(__file__).resolve().parent.parent / "bench_100k_docs.json"
     if not corpus_path.exists():
         print(f"Error: Corpus file not found: {corpus_path}")
         sys.exit(1)
-    with open(corpus_path) as f:
-        all_docs = json.load(f)
+    return load_corpus_slice(corpus_path)
+
+
+async def _create_index(client, index_name: str, corpus_slice: list[dict]) -> None:
+    from moss import DocumentInfo
+
     docs = [
         DocumentInfo(id=d["id"], text=d["text"], metadata=d.get("metadata"))
-        for d in all_docs[:DOC_COUNT]
+        for d in corpus_slice
     ]
     result = await client.create_index(index_name, docs, MODEL_ID)
     print(f"Created index '{index_name}' with {result.doc_count} docs")
@@ -65,7 +74,12 @@ async def main(recreate: bool) -> None:
 
     project_id = os.getenv("MOSS_PROJECT_ID")
     project_key = os.getenv("MOSS_PROJECT_KEY")
-    index_name = os.getenv("MOSS_INDEX_NAME", INDEX_NAME_DEFAULT)
+    # Same derivation as the benchmark tests: the index name embeds the
+    # corpus/model signature, so generation and evaluation can never target
+    # indexes built from different inputs.
+    corpus_slice = _corpus_slice()
+    signature = corpus_signature(corpus_slice)
+    index_name = os.getenv("MOSS_INDEX_NAME") or index_name_for(signature)
 
     if not project_id or not project_key:
         print("Error: MOSS_PROJECT_ID and MOSS_PROJECT_KEY must be set.")
@@ -86,7 +100,7 @@ async def main(recreate: bool) -> None:
     if index_name in existing:
         print(f"Using existing index '{index_name}'")
     else:
-        await _create_index(client, index_name)
+        await _create_index(client, index_name, corpus_slice)
 
     await client.load_index(index_name)
 
@@ -107,6 +121,9 @@ async def main(recreate: bool) -> None:
         "top_k": GROUND_TRUTH_TOP_K,
         "index_name": index_name,
         "doc_count": DOC_COUNT,
+        # Validated by the benchmark tests: recall is only evaluated when the
+        # current corpus/model signature matches the one used at generation.
+        "signature": signature,
         "queries": ground_truth,
     }
 

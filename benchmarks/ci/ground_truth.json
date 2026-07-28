@@ -1,8 +1,9 @@
 {
   "model": "moss-minilm",
   "top_k": 50,
-  "index_name": "benchmark-ci",
+  "index_name": "benchmark-ci-73d5e83176f7",
   "doc_count": 1000,
+  "signature": "73d5e83176f7",
   "queries": {
     "neural network training data": [
       "doc_113",

@@ -30,7 +30,14 @@ from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 
-from bench_queries import DOC_COUNT, INDEX_NAME_DEFAULT, MODEL_ID, QUERIES
+from bench_queries import (
+    DOC_COUNT,
+    MODEL_ID,
+    QUERIES,
+    corpus_signature,
+    index_name_for,
+    load_corpus_slice,
+)
 
 load_dotenv()
 
@@ -100,18 +107,52 @@ def _git_sha() -> str:
 
 
 @pytest.fixture(scope="session")
-def moss_client():
-    """Create a MossClient and load the benchmark index once per session."""
-    # Import lazily — Moss native bindings may not be installed in every env.
-    from moss import MossClient, DocumentInfo
+def corpus_slice() -> list[dict]:
+    """The exact corpus slice the benchmark index is built from."""
+    corpus_path = CI_DIR.parent / "bench_100k_docs.json"
+    if not corpus_path.exists():
+        pytest.skip(f"Corpus file not found: {corpus_path}")
+    return load_corpus_slice(corpus_path)
 
+
+@pytest.fixture(scope="session")
+def corpus_sig(corpus_slice) -> str:
+    """Content signature of model + DOC_COUNT + corpus slice."""
+    return corpus_signature(corpus_slice)
+
+
+@pytest.fixture(scope="session")
+def moss_client(corpus_slice, corpus_sig):
+    """Create a MossClient and load the benchmark index once per session.
+
+    The index name embeds ``corpus_sig``, so an index built from a different
+    corpus, DOC_COUNT, or model can never be silently reused — mismatched
+    inputs produce a different name and the index is (re)created from the
+    current corpus.
+    """
     project_id = os.getenv("MOSS_PROJECT_ID")
     project_key = os.getenv("MOSS_PROJECT_KEY")
     if not project_id or not project_key:
+        if os.getenv("ALLOW_BENCHMARK_SKIP") == "1":
+            pytest.skip(
+                "MOSS_PROJECT_ID / MOSS_PROJECT_KEY not set — fork PR without "
+                "secrets, skipping benchmarks"
+            )
+        if os.getenv("CI"):
+            pytest.fail(
+                "MOSS_PROJECT_ID / MOSS_PROJECT_KEY are not set in a trusted CI "
+                "run — the benchmark workflow would otherwise pass as a green "
+                "no-op. Configure the repository secrets, or export "
+                "ALLOW_BENCHMARK_SKIP=1 for runs that legitimately lack them."
+            )
         pytest.skip("MOSS_PROJECT_ID / MOSS_PROJECT_KEY not set — skipping benchmarks")
 
+    # Import lazily (and only once credentials are known to exist) — Moss
+    # native bindings may not be installed in every env.
+    from moss import MossClient, DocumentInfo
+
     client = MossClient(project_id, project_key)
-    index_name = os.getenv("MOSS_INDEX_NAME", INDEX_NAME_DEFAULT)
+    index_name = os.getenv("MOSS_INDEX_NAME") or index_name_for(corpus_sig)
 
     async def _setup():
         # Determine existence explicitly (rather than treating any get_index
@@ -119,19 +160,13 @@ def moss_client():
         # silently triggering index creation.
         existing = {idx.name for idx in await client.list_indexes()}
         if index_name not in existing:
-            # Load documents from the shared corpus file.
-            corpus_path = CI_DIR.parent / "bench_100k_docs.json"
-            if not corpus_path.exists():
-                pytest.skip(f"Corpus file not found: {corpus_path}")
-            with open(corpus_path) as f:
-                all_docs = json.load(f)
             docs = [
                 DocumentInfo(
                     id=d["id"],
                     text=d["text"],
                     metadata=d.get("metadata"),
                 )
-                for d in all_docs[:DOC_COUNT]
+                for d in corpus_slice
             ]
             await client.create_index(index_name, docs, MODEL_ID)
 
@@ -143,18 +178,31 @@ def moss_client():
 
 
 @pytest.fixture(scope="session")
-def ground_truth() -> dict[str, list[str]]:
-    """Load pre-computed ground truth document IDs per query."""
+def ground_truth(corpus_sig) -> dict[str, list[str]]:
+    """Load pre-computed ground truth document IDs per query.
+
+    Fails (not skips) when the ground truth was generated from a different
+    corpus/model/DOC_COUNT — evaluating recall against mismatched expected
+    ids would mask corpus or model regressions.
+    """
     gt_path = CI_DIR / "ground_truth.json"
     if not gt_path.exists():
         pytest.skip(f"Ground truth file not found: {gt_path}")
     with open(gt_path) as f:
         data = json.load(f)
+    gt_sig = data.get("signature")
+    if gt_sig != corpus_sig:
+        pytest.fail(
+            f"ground_truth.json signature {gt_sig!r} does not match the current "
+            f"corpus/model signature {corpus_sig!r} — the corpus, DOC_COUNT, or "
+            "model changed since generation. Regenerate with: "
+            "python benchmarks/ci/generate_ground_truth.py --recreate"
+        )
     return data.get("queries", {})
 
 
 @pytest.fixture(scope="session")
-def benchmark_results() -> dict:
+def benchmark_results(corpus_sig) -> dict:
     """Mutable dict that accumulates results across tests in this session.
 
     The ``test_write_results`` finalizer serializes this to JSON.
@@ -167,6 +215,8 @@ def benchmark_results() -> dict:
             "query_rounds": QUERY_ROUNDS,
             "warmup_rounds": WARMUP_ROUNDS,
             "top_k_latency": TOP_K_LATENCY,
+            "signature": corpus_sig,
+            "index_name": os.getenv("MOSS_INDEX_NAME") or index_name_for(corpus_sig),
         },
         "latency_ms": {},
         "recall": {},

@@ -87,6 +87,27 @@ change), update the baseline:
    commit. Baselines should always come from CI runners — latency measured
    on other hardware is not comparable.
 
+## Index naming and staleness protection
+
+The benchmark index name is derived from a content signature —
+`benchmark-ci-<hash>` where the hash covers the model id, `DOC_COUNT`, and
+the exact corpus slice being indexed. If any of those inputs change, the
+name changes and the index is rebuilt from the current corpus, so a stale
+remote index can never be silently benchmarked. `ground_truth.json` embeds
+the same signature; the recall test **fails** (with a regenerate hint) when
+the ground truth was generated from different inputs. Set `MOSS_INDEX_NAME`
+to override the derived name (this bypasses the staleness protection for
+the index itself; the ground-truth signature check still applies).
+
+## Credentials policy
+
+- **Trusted CI runs** (push to `main`, same-repo PRs, manual dispatch):
+  missing `MOSS_PROJECT_ID` / `MOSS_PROJECT_KEY` **fails** the suite — a
+  misconfigured secret must not turn the workflow into a green no-op.
+- **Fork PRs**: secrets are not available to forks, so the workflow sets
+  `ALLOW_BENCHMARK_SKIP=1` and the suite skips cleanly.
+- **Local runs** (no `CI` env var): missing credentials skip the suite.
+
 ## CI integration
 
 The benchmark runs as a GitHub Actions job (`.github/workflows/benchmark.yml`).
