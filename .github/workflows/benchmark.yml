@@ -3,6 +3,14 @@ name: Benchmark
 permissions:
   contents: read
 
+# All benchmark runs share one Moss project and the deterministic
+# benchmark-ci-<hash> index, so concurrent jobs could race on first index
+# creation and contaminate each other's latency numbers with cross-job
+# load. Serialize globally; don't cancel a run that is already measuring.
+concurrency:
+  group: moss-benchmark
+  cancel-in-progress: false
+
 on:
   push:
     branches: [main]

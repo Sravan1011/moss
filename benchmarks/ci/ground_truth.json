@@ -4,6 +4,10 @@
   "index_name": "benchmark-ci-73d5e83176f7",
   "doc_count": 1000,
   "signature": "73d5e83176f7",
+  "query_set": {
+    "hash": "70d932a5a939",
+    "count": 15
+  },
   "queries": {
     "neural network training data": [
       "doc_113",

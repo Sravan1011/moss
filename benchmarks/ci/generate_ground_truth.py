@@ -41,6 +41,7 @@ from bench_queries import (
     corpus_signature,
     index_name_for,
     load_corpus_slice,
+    query_set_hash,
 )
 
 load_dotenv()
@@ -122,8 +123,10 @@ async def main(recreate: bool) -> None:
         "index_name": index_name,
         "doc_count": DOC_COUNT,
         # Validated by the benchmark tests: recall is only evaluated when the
-        # current corpus/model signature matches the one used at generation.
+        # current corpus/model signature AND query set match the ones used
+        # at generation.
         "signature": signature,
+        "query_set": {"hash": query_set_hash(), "count": len(QUERIES)},
         "queries": ground_truth,
     }
 

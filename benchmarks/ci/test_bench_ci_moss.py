@@ -37,6 +37,7 @@ from bench_queries import (
     corpus_signature,
     index_name_for,
     load_corpus_slice,
+    query_set_hash,
 )
 
 load_dotenv()
@@ -101,6 +102,50 @@ def _git_sha() -> str:
         return "unknown"
 
 
+def _missing_required_input(message: str):
+    """Handle a missing required benchmark input (corpus, ground truth, …).
+
+    Skip on fork PRs (``ALLOW_BENCHMARK_SKIP=1``) and local runs, but FAIL
+    in trusted CI — a missing required input must not turn the benchmark
+    workflow into a green no-op.
+    """
+    if os.getenv("ALLOW_BENCHMARK_SKIP") == "1":
+        pytest.skip(f"{message} — fork PR, skipping benchmarks")
+    if os.getenv("CI"):
+        pytest.fail(f"{message} — required input missing in a trusted CI run")
+    pytest.skip(message)
+
+
+# Config keys that must match between the current run and the baseline for a
+# regression comparison to be meaningful. index_name is excluded: it may be
+# overridden via MOSS_INDEX_NAME without changing what is measured.
+BASELINE_COMPAT_KEYS = (
+    "signature",
+    "query_set_hash",
+    "doc_count",
+    "query_rounds",
+    "warmup_rounds",
+    "top_k_latency",
+)
+
+
+def _assert_baseline_compatible(baseline: dict, benchmark_results: dict) -> None:
+    """Fail when the baseline was captured under different benchmark inputs.
+
+    Comparing against a baseline built from another corpus/model, query set,
+    or measurement config silently masks (or fabricates) regressions.
+    """
+    current = {k: benchmark_results.get("config", {}).get(k) for k in BASELINE_COMPAT_KEYS}
+    base = {k: baseline.get("config", {}).get(k) for k in BASELINE_COMPAT_KEYS}
+    if base != current:
+        diffs = {k: (base[k], current[k]) for k in BASELINE_COMPAT_KEYS if base[k] != current[k]}
+        pytest.fail(
+            "baseline.json is not comparable to this run — config mismatch "
+            f"(baseline vs current): {diffs}. Regenerate the baseline via the "
+            "Benchmark workflow with update_baseline=true and commit the artifact."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Session-scoped fixtures
 # ---------------------------------------------------------------------------
@@ -111,7 +156,7 @@ def corpus_slice() -> list[dict]:
     """The exact corpus slice the benchmark index is built from."""
     corpus_path = CI_DIR.parent / "bench_100k_docs.json"
     if not corpus_path.exists():
-        pytest.skip(f"Corpus file not found: {corpus_path}")
+        _missing_required_input(f"Corpus file not found: {corpus_path}")
     return load_corpus_slice(corpus_path)
 
 
@@ -187,7 +232,7 @@ def ground_truth(corpus_sig) -> dict[str, list[str]]:
     """
     gt_path = CI_DIR / "ground_truth.json"
     if not gt_path.exists():
-        pytest.skip(f"Ground truth file not found: {gt_path}")
+        _missing_required_input(f"Ground truth file not found: {gt_path}")
     with open(gt_path) as f:
         data = json.load(f)
     gt_sig = data.get("signature")
@@ -197,6 +242,14 @@ def ground_truth(corpus_sig) -> dict[str, list[str]]:
             f"corpus/model signature {corpus_sig!r} — the corpus, DOC_COUNT, or "
             "model changed since generation. Regenerate with: "
             "python benchmarks/ci/generate_ground_truth.py --recreate"
+        )
+    gt_query_hash = data.get("query_set", {}).get("hash")
+    if gt_query_hash != query_set_hash():
+        pytest.fail(
+            f"ground_truth.json query-set hash {gt_query_hash!r} does not match "
+            f"the current query set ({query_set_hash()!r}) — QUERIES changed "
+            "since generation. Regenerate with: "
+            "python benchmarks/ci/generate_ground_truth.py"
         )
     return data.get("queries", {})
 
@@ -216,6 +269,8 @@ def benchmark_results(corpus_sig) -> dict:
             "warmup_rounds": WARMUP_ROUNDS,
             "top_k_latency": TOP_K_LATENCY,
             "signature": corpus_sig,
+            "query_set_hash": query_set_hash(),
+            "query_count": len(QUERIES),
             "index_name": os.getenv("MOSS_INDEX_NAME") or index_name_for(corpus_sig),
         },
         "latency_ms": {},
@@ -347,8 +402,12 @@ class TestRegressionGuard:
         baseline_path = request.config.getoption("--baseline-file")
         threshold = request.config.getoption("--latency-threshold")
 
-        if not baseline_path or not Path(baseline_path).exists():
+        if not baseline_path:
             pytest.skip("No baseline file provided — skipping regression check")
+        if not Path(baseline_path).exists():
+            # An explicitly requested baseline that is absent is a config
+            # error, not an optional feature — never a green skip.
+            pytest.fail(f"--baseline-file was provided but does not exist: {baseline_path}")
 
         with open(baseline_path) as f:
             baseline = json.load(f)
@@ -358,6 +417,8 @@ class TestRegressionGuard:
 
         if baseline_p95 is None or current_p95 is None:
             pytest.skip("Latency data not yet available — run latency test first")
+
+        _assert_baseline_compatible(baseline, benchmark_results)
 
         if baseline_p95 == 0:
             pytest.skip("Baseline p95 is zero — cannot compute regression ratio")
@@ -380,8 +441,10 @@ class TestRegressionGuard:
         baseline_path = request.config.getoption("--baseline-file")
         threshold = request.config.getoption("--recall-threshold")
 
-        if not baseline_path or not Path(baseline_path).exists():
+        if not baseline_path:
             pytest.skip("No baseline file provided — skipping regression check")
+        if not Path(baseline_path).exists():
+            pytest.fail(f"--baseline-file was provided but does not exist: {baseline_path}")
 
         with open(baseline_path) as f:
             baseline = json.load(f)
@@ -391,6 +454,8 @@ class TestRegressionGuard:
 
         if baseline_recall is None or current_recall is None:
             pytest.skip("Recall data not yet available — run recall test first")
+
+        _assert_baseline_compatible(baseline, benchmark_results)
 
         drop = baseline_recall - current_recall
 

@@ -93,11 +93,24 @@ The benchmark index name is derived from a content signature —
 `benchmark-ci-<hash>` where the hash covers the model id, `DOC_COUNT`, and
 the exact corpus slice being indexed. If any of those inputs change, the
 name changes and the index is rebuilt from the current corpus, so a stale
-remote index can never be silently benchmarked. `ground_truth.json` embeds
-the same signature; the recall test **fails** (with a regenerate hint) when
-the ground truth was generated from different inputs. Set `MOSS_INDEX_NAME`
+remote index can never be silently benchmarked. Set `MOSS_INDEX_NAME`
 to override the derived name (this bypasses the staleness protection for
-the index itself; the ground-truth signature check still applies).
+the index itself; the compatibility checks below still apply).
+
+Three compatibility checks keep every comparison honest, and each **fails**
+(never skips) on mismatch:
+
+- `ground_truth.json` embeds the corpus/model **signature** — recall is not
+  evaluated against ground truth generated from different inputs.
+- `ground_truth.json` also embeds a **query-set hash** — adding, removing,
+  or editing `QUERIES` without regenerating trips it.
+- `baseline.json`'s config (signature, query-set hash, doc count, rounds,
+  top_k) must match the current run's config — the regression guard refuses
+  to compare against a baseline captured under different benchmark inputs.
+
+Runs are serialized via a GitHub Actions `concurrency` group (without
+cancelling in-progress runs): all jobs share one Moss project, so parallel
+runs could race on index creation and contaminate each other's latency.
 
 ## Credentials policy
 

@@ -45,6 +45,20 @@ def index_name_for(signature: str) -> str:
     """Benchmark index name derived from the corpus/model signature."""
     return f"{INDEX_NAME_PREFIX}-{signature}"
 
+
+def query_set_hash() -> str:
+    """Short hash of the benchmark query set.
+
+    Stored in ``ground_truth.json`` and in every results file's config so
+    the recall test and the regression guard can detect a query set that
+    drifted from the one used at generation/baseline time.
+    """
+    h = hashlib.sha256()
+    for q in QUERIES:
+        h.update(q.encode())
+        h.update(b"\x00")
+    return h.hexdigest()[:12]
+
 QUERIES = [
     "neural network training data",
     "anomaly detection patterns",
