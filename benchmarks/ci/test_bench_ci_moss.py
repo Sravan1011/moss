@@ -28,17 +28,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-from dotenv import load_dotenv
-
 from bench_queries import (
     DOC_COUNT,
     MODEL_ID,
     QUERIES,
+    build_fingerprint,
     corpus_signature,
     index_name_for,
     load_corpus_slice,
     query_set_hash,
 )
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -66,7 +66,7 @@ def _percentile(values: list[float], p: float) -> float:
     """Compute the *p*-th percentile from a **sorted** list of values."""
     if not values:
         return 0.0
-    idx = max(int(math.ceil(p * len(values))) - 1, 0)
+    idx = max(math.ceil(p * len(values)) - 1, 0)
     return values[idx]
 
 
@@ -98,7 +98,7 @@ def _git_sha() -> str:
             check=True,
         )
         return result.stdout.strip()
-    except Exception:
+    except (subprocess.SubprocessError, OSError):
         return "unknown"
 
 
@@ -167,13 +167,21 @@ def corpus_sig(corpus_slice) -> str:
 
 
 @pytest.fixture(scope="session")
-def moss_client(corpus_slice, corpus_sig):
+def build_fp() -> str:
+    """Fingerprint of the index build path (SDK versions + source tree)."""
+    return build_fingerprint()
+
+
+@pytest.fixture(scope="session")
+def moss_client(corpus_slice, corpus_sig, build_fp):
     """Create a MossClient and load the benchmark index once per session.
 
-    The index name embeds ``corpus_sig``, so an index built from a different
-    corpus, DOC_COUNT, or model can never be silently reused — mismatched
-    inputs produce a different name and the index is (re)created from the
-    current corpus.
+    The index name embeds ``corpus_sig`` (corpus/DOC_COUNT/model) AND
+    ``build_fp`` (SDK versions + source), so an index built from different
+    data or by different indexing code can never be silently reused —
+    mismatched inputs produce a different name and the index is (re)created
+    from the current corpus by the current code, exercising the full
+    create_index/document-serialization path whenever it changes.
     """
     project_id = os.getenv("MOSS_PROJECT_ID")
     project_key = os.getenv("MOSS_PROJECT_KEY")
@@ -194,10 +202,10 @@ def moss_client(corpus_slice, corpus_sig):
 
     # Import lazily (and only once credentials are known to exist) — Moss
     # native bindings may not be installed in every env.
-    from moss import MossClient, DocumentInfo
+    from moss import DocumentInfo, MossClient
 
     client = MossClient(project_id, project_key)
-    index_name = os.getenv("MOSS_INDEX_NAME") or index_name_for(corpus_sig)
+    index_name = os.getenv("MOSS_INDEX_NAME") or index_name_for(corpus_sig, build_fp)
 
     async def _setup():
         # Determine existence explicitly (rather than treating any get_index
@@ -255,12 +263,14 @@ def ground_truth(corpus_sig) -> dict[str, list[str]]:
 
 
 @pytest.fixture(scope="session")
-def benchmark_results(corpus_sig) -> dict:
+def benchmark_results(request, corpus_sig, build_fp) -> dict:
     """Mutable dict that accumulates results across tests in this session.
 
-    The ``test_write_results`` finalizer serializes this to JSON.
+    Registered on the pytest config so ``pytest_sessionfinish`` (in
+    conftest.py) serializes it to JSON after the run — regardless of test
+    ordering, ``-x``/``--maxfail``, or guard failures.
     """
-    return {
+    results = {
         "commit": _git_sha(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "config": {
@@ -271,17 +281,23 @@ def benchmark_results(corpus_sig) -> dict:
             "signature": corpus_sig,
             "query_set_hash": query_set_hash(),
             "query_count": len(QUERIES),
-            "index_name": os.getenv("MOSS_INDEX_NAME") or index_name_for(corpus_sig),
+            "build_fingerprint": build_fp,
+            "index_name": os.getenv("MOSS_INDEX_NAME")
+            or index_name_for(corpus_sig, build_fp),
         },
         "latency_ms": {},
         "recall": {},
     }
+    request.config._benchmark_results = results
+    return results
 
 
 # ---------------------------------------------------------------------------
-# Tests — pytest collects these in declaration order (measure → guard →
-# write). Locally and on fork PRs the guards degrade gracefully (skip) when
-# measurement data is missing. In trusted CI the guards FAIL on missing
+# Tests — pytest collects these in declaration order (measure → guard).
+# Results serialization happens in conftest.pytest_sessionfinish, so the
+# artifact is written even under -x/--maxfail, reordering plugins, or guard
+# failures. Locally and on fork PRs the guards degrade gracefully (skip)
+# when measurement data is missing. In trusted CI the guards FAIL on missing
 # measurement data — a regression gate that silently passes without
 # measurements is a green no-op — so a random-ordering plugin that runs a
 # guard before the measurement tests will fail loudly there, by design.
@@ -513,14 +529,3 @@ class TestRegressionGuard:
                 )
 
         assert not failures, "Recall regression: " + "; ".join(failures)
-
-
-class TestWriteResults:
-    """Serialize benchmark results to JSON (always runs last)."""
-
-    def test_write_results(self, request, benchmark_results):
-        output_path = Path(request.config.getoption("--benchmark-output"))
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "w") as f:
-            json.dump(benchmark_results, f, indent=2)
-        print(f"\n  Results written to: {output_path}")

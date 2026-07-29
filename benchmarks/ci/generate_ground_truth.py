@@ -32,18 +32,18 @@ import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 from bench_queries import (
     DOC_COUNT,
     INDEX_NAME_PREFIX,
     MODEL_ID,
     QUERIES,
+    build_fingerprint,
     corpus_signature,
     index_name_for,
     load_corpus_slice,
     query_set_hash,
 )
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -96,17 +96,19 @@ def _guard_deletion(index_name: str, derived_name: str, force: bool) -> None:
         sys.exit(1)
 
 
-async def main(recreate: bool, force: bool) -> None:
+async def main(recreate: bool, force: bool, prune: bool) -> dict:
     from moss import MossClient, QueryOptions
 
     project_id = os.getenv("MOSS_PROJECT_ID")
     project_key = os.getenv("MOSS_PROJECT_KEY")
     # Same derivation as the benchmark tests: the index name embeds the
-    # corpus/model signature, so generation and evaluation can never target
-    # indexes built from different inputs.
+    # corpus/model signature and the SDK build fingerprint, so generation
+    # and evaluation can never target indexes built from different inputs
+    # or by different indexing code.
     corpus_slice = _corpus_slice()
     signature = corpus_signature(corpus_slice)
-    index_name = os.getenv("MOSS_INDEX_NAME") or index_name_for(signature)
+    derived_name = index_name_for(signature, build_fingerprint())
+    index_name = os.getenv("MOSS_INDEX_NAME") or derived_name
 
     if not project_id or not project_key:
         print("Error: MOSS_PROJECT_ID and MOSS_PROJECT_KEY must be set.")
@@ -120,7 +122,7 @@ async def main(recreate: bool, force: bool) -> None:
     existing = {idx.name for idx in await client.list_indexes()}
 
     if index_name in existing and recreate:
-        _guard_deletion(index_name, index_name_for(signature), force)
+        _guard_deletion(index_name, derived_name, force)
         print(f"--recreate: deleting existing index '{index_name}'")
         await client.delete_index(index_name)
         existing.discard(index_name)
@@ -157,12 +159,23 @@ async def main(recreate: bool, force: bool) -> None:
         "queries": ground_truth,
     }
 
-    output_path = Path(__file__).resolve().parent / "ground_truth.json"
-    with open(output_path, "w") as f:
-        json.dump(output, f, indent=2)
+    if prune:
+        # Old corpus/SDK revisions leave benchmark-ci-* indexes behind;
+        # remove everything in the benchmark namespace except the index we
+        # just used. Never touches indexes outside the namespace.
+        stale = sorted(
+            n
+            for n in existing
+            if n != index_name
+            and (n == INDEX_NAME_PREFIX or n.startswith(f"{INDEX_NAME_PREFIX}-"))
+        )
+        for n in stale:
+            print(f"--prune: deleting stale benchmark index '{n}'")
+            await client.delete_index(n)
+        if not stale:
+            print("--prune: no stale benchmark indexes found")
 
-    print(f"\nGround truth written to: {output_path}")
-    print(f"Queries: {len(ground_truth)}")
+    return output
 
 
 if __name__ == "__main__":
@@ -181,5 +194,19 @@ if __name__ == "__main__":
         "derived index name. Only benchmark-namespace indexes "
         "(benchmark-ci-*) can be deleted even with this flag.",
     )
+    parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="After generating, delete leftover benchmark-namespace indexes "
+        "(benchmark-ci-*) from earlier corpus/SDK revisions. Indexes outside "
+        "the benchmark namespace are never touched.",
+    )
     args = parser.parse_args()
-    asyncio.run(main(recreate=args.recreate, force=args.force))
+    output = asyncio.run(main(recreate=args.recreate, force=args.force, prune=args.prune))
+
+    output_path = Path(__file__).resolve().parent / "ground_truth.json"
+    with open(output_path, "w") as f:
+        json.dump(output, f, indent=2)
+
+    print(f"\nGround truth written to: {output_path}")
+    print(f"Queries: {len(output['queries'])}")

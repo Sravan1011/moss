@@ -41,9 +41,40 @@ def corpus_signature(docs: list[dict[str, Any]]) -> str:
     return h.hexdigest()[:12]
 
 
-def index_name_for(signature: str) -> str:
-    """Benchmark index name derived from the corpus/model signature."""
-    return f"{INDEX_NAME_PREFIX}-{signature}"
+def build_fingerprint() -> str:
+    """Fingerprint of the code path that builds the index.
+
+    Covers the installed SDK/bindings versions and, when running from the
+    repository, a content hash of the Python SDK source tree. Any change to
+    the indexing/build path yields a new fingerprint — and therefore a new
+    index name via ``index_name_for`` — so the benchmark rebuilds the index
+    and exercises ``create_index``/document serialization instead of loading
+    an index built by older code (which could pass on stale embeddings).
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    h = hashlib.sha256()
+    for pkg in ("moss", "inferedge-moss", "inferedge-moss-core"):
+        try:
+            h.update(f"{pkg}={version(pkg)}".encode())
+        except PackageNotFoundError:
+            pass
+    sdk_src = Path(__file__).resolve().parents[2] / "sdks" / "python" / "sdk" / "src"
+    if sdk_src.is_dir():
+        for p in sorted(sdk_src.rglob("*.py")):
+            h.update(str(p.relative_to(sdk_src)).encode())
+            h.update(p.read_bytes())
+    return h.hexdigest()[:12]
+
+
+def index_name_for(signature: str, fingerprint: str) -> str:
+    """Benchmark index name derived from data signature + build fingerprint.
+
+    The name is the index's manifest: it changes whenever the corpus slice,
+    DOC_COUNT, model, or the SDK build path changes, so a stale remote index
+    can never be silently reused against mismatched inputs or code.
+    """
+    return f"{INDEX_NAME_PREFIX}-{signature}-{fingerprint}"
 
 
 def query_set_hash() -> str:

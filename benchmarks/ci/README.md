@@ -107,13 +107,27 @@ change), update the baseline:
 
 ## Index naming and staleness protection
 
-The benchmark index name is derived from a content signature —
-`benchmark-ci-<hash>` where the hash covers the model id, `DOC_COUNT`, and
-the exact corpus slice being indexed. If any of those inputs change, the
-name changes and the index is rebuilt from the current corpus, so a stale
-remote index can never be silently benchmarked. Set `MOSS_INDEX_NAME`
-to override the derived name (this bypasses the staleness protection for
-the index itself; the compatibility checks below still apply).
+The benchmark index name is derived from two content hashes —
+`benchmark-ci-<data_sig>-<build_fp>`:
+
+- **data signature** covers the model id, `DOC_COUNT`, and the exact corpus
+  slice being indexed;
+- **build fingerprint** covers the installed SDK/bindings versions and the
+  Python SDK source tree, i.e. the code that builds the index.
+
+If any of those inputs change, the name changes and the index is rebuilt
+from the current corpus by the current code — so a stale remote index can
+never be silently benchmarked, and a PR that changes `create_index`,
+document serialization, or the index/model build path always exercises that
+path (an embedding change then surfaces as a recall regression instead of
+passing against old embeddings). Set `MOSS_INDEX_NAME` to override the
+derived name (this bypasses the staleness protection for the index itself;
+the compatibility checks below still apply).
+
+Superseded indexes accumulate in the Moss project as signatures change;
+clean them up occasionally with
+`python benchmarks/ci/generate_ground_truth.py --prune` (only
+`benchmark-ci-*` indexes are ever deleted).
 
 Three compatibility checks keep every comparison honest, and each **fails**
 (never skips) on mismatch:
