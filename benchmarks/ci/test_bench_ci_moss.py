@@ -38,7 +38,13 @@ from bench_queries import (
     load_corpus_slice,
     query_set_hash,
 )
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:  # pragma: no cover - optional outside benchmarks/ci
+
+    def load_dotenv() -> None:
+        return None
+
 
 load_dotenv()
 
@@ -204,10 +210,15 @@ def moss_client(corpus_slice, corpus_sig, build_fp):
     # native bindings may not be installed in every env.
     from moss import DocumentInfo, MossClient
 
-    client = MossClient(project_id, project_key)
     index_name = os.getenv("MOSS_INDEX_NAME") or index_name_for(corpus_sig, build_fp)
 
     async def _setup():
+        # Construct the client inside the coroutine, after _run() has
+        # created and installed the shared event loop — MossClient may bind
+        # an async session or call get_event_loop() internally, and must do
+        # so against the loop it will actually run on.
+        client = MossClient(project_id, project_key)
+
         # Determine existence explicitly (rather than treating any get_index
         # failure as "missing") so auth/network errors surface instead of
         # silently triggering index creation.

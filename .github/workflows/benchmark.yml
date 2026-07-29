@@ -54,11 +54,13 @@ jobs:
         env:
           MOSS_PROJECT_ID: ${{ secrets.MOSS_PROJECT_ID }}
           MOSS_PROJECT_KEY: ${{ secrets.MOSS_PROJECT_KEY }}
-          # Fork PRs cannot read repository secrets, so missing credentials
-          # are expected there and the suite may skip. On trusted runs
-          # (push to main, same-repo PRs, manual dispatch) missing secrets
-          # make the suite FAIL instead of passing as a green no-op.
-          ALLOW_BENCHMARK_SKIP: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && '1' || '0' }}
+          # Fork PRs, and same-repo Dependabot PRs (which GitHub also denies
+          # normal secrets), cannot read repository secrets, so missing
+          # credentials are expected there and the suite may skip. On other
+          # trusted runs (push to main, same-repo human PRs, manual
+          # dispatch) missing secrets make the suite FAIL instead of
+          # passing as a green no-op.
+          ALLOW_BENCHMARK_SKIP: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]')) && '1' || '0' }}
         run: |
           # Baseline-update runs skip the regression comparison: comparing
           # against the baseline being replaced would fail the run (and skip

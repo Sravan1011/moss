@@ -42,28 +42,36 @@ def corpus_signature(docs: list[dict[str, Any]]) -> str:
 
 
 def build_fingerprint() -> str:
-    """Fingerprint of the code path that builds the index.
+    """Fingerprint of every file belonging to the packages that build the index.
 
-    Covers the installed SDK/bindings versions and, when running from the
-    repository, a content hash of the Python SDK source tree. Any change to
-    the indexing/build path yields a new fingerprint — and therefore a new
-    index name via ``index_name_for`` — so the benchmark rebuilds the index
-    and exercises ``create_index``/document serialization instead of loading
-    an index built by older code (which could pass on stale embeddings).
+    Hashes the on-disk content of every file in the installed ``moss`` and
+    ``inferedge-moss-core`` distributions — Python sources, data files, and
+    native bindings (``.so``/``.pyd``) alike — rather than just their
+    version strings. A rebuilt native binding (e.g. a locally compiled wheel
+    during development, or a binding change that ships under an unchanged
+    version pin) still changes the file bytes even when the version string
+    doesn't, so it isn't missed. Any change to the indexing/build path
+    yields a new fingerprint — and therefore a new index name via
+    ``index_name_for`` — so the benchmark rebuilds the index and exercises
+    ``create_index``/document serialization instead of loading an index
+    built by older code (which could pass on stale embeddings).
     """
-    from importlib.metadata import PackageNotFoundError, version
+    from importlib.metadata import PackageNotFoundError, distribution
 
     h = hashlib.sha256()
-    for pkg in ("moss", "inferedge-moss", "inferedge-moss-core"):
+    for pkg in ("moss", "inferedge-moss-core"):
         try:
-            h.update(f"{pkg}={version(pkg)}".encode())
+            dist = distribution(pkg)
         except PackageNotFoundError:
-            pass
-    sdk_src = Path(__file__).resolve().parents[2] / "sdks" / "python" / "sdk" / "src"
-    if sdk_src.is_dir():
-        for p in sorted(sdk_src.rglob("*.py")):
-            h.update(str(p.relative_to(sdk_src)).encode())
-            h.update(p.read_bytes())
+            continue
+        h.update(f"{pkg}={dist.version}".encode())
+        for rel_path in sorted(dist.files or (), key=str):
+            try:
+                data = rel_path.read_binary()
+            except (FileNotFoundError, IsADirectoryError, OSError):
+                continue
+            h.update(str(rel_path).encode())
+            h.update(data)
     return h.hexdigest()[:12]
 
 
